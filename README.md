@@ -1,6 +1,6 @@
 # Mart App: Enterprise-Grade Microservices Ecosystem
 
-**Mart**, A highly-available e-commerce ecosystem built on a microservice architecture. Mart solves the 'Black Friday' and 'Christmas' traffic by decoupling core services like the storefront, fashion section and book catalog into independent, containerized units that scale on demand.
+**Mart**: A highly-available e-commerce ecosystem built on a microservice architecture. Mart solves the 'Black Friday' and 'Christmas' traffic by decoupling core services like the storefront, fashion section and book catalog into independent, containerized units that scale on demand.
 
 ---
 
