@@ -1,9 +1,5 @@
 # Mart App: Enterprise-Grade Microservices Ecosystem
 
-Mart is a high-availability, distributed e-commerce platform designed to demonstrate modern cloud-native architecture. By decoupling the "Monolith" into specialized microservices, the system ensures fault tolerance and independent scalability—essential for handling high-traffic retail events.
-
-## Architectural Overview
-
 **Mart**: A highly-available e-commerce ecosystem built on a microservice architecture. Mart solves the 'Black Friday' and 'Christmas' traffic by decoupling core services like the storefront, fashion section and book catalog into independent, containerized units that scale on demand.
 
 ---
