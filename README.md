@@ -16,7 +16,7 @@ The project utilizes a **Microservices Architecture** to ensure that business do
 ---
 
 ## Key Features
-=======
+
 ## Database Strategy: Polyglot Persistence
 
 Different types of data require different storage solutions. This project implements a dual-database approach:
