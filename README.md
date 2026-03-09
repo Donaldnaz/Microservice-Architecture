@@ -24,7 +24,7 @@ Different types of data require different storage solutions. This project implem
 | Service              | Database    | Type       | Reasoning 
 | :---                 | :---        | :---       | :--- 
 | **Orders & Users**   | **MySQL**   | Relational | Ensures ACID compliance for transactional integrity. 
-| **Product Catalog**  | **MongoDB** | NoSQL      | Flexible schema to handle diverse product attributes (Books vs. Electronics).
+| **Product Catalog**  | **MongoDB** | NoSQL      | Flexible schema to handle diverse product attributes e.g color, size, material.
 
 ---
 
