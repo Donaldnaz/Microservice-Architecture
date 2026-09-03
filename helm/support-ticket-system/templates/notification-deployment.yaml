@@ -1,0 +1,82 @@
+# =============================================================================
+# notification-service — Deployment
+# Flask service in the backend namespace that stores notifications in memory.
+#
+# IMPORTANT — In-memory state trade-off:
+#   Each pod independently stores only the notifications it received.
+#   With minReplicas=2, the frontend GET /notifications may hit either pod
+#   and return a partial view. Resolve by adding a Redis or RDS backend
+#   before treating this as fully production-ready.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "support-ticket-system.fullname" . }}-notification-service
+  namespace: {{ .Values.namespaces.backend }}
+  labels:
+    app: {{ include "support-ticket-system.fullname" . }}-notification-service
+    {{- include "support-ticket-system.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.notificationService.replicas }}
+  selector:
+    matchLabels:
+      app: {{ include "support-ticket-system.fullname" . }}-notification-service
+  # Zero-downtime rollout: new pod must be ready before old one is removed
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: {{ include "support-ticket-system.fullname" . }}-notification-service
+        {{- include "support-ticket-system.labels" . | nindent 8 }}
+    spec:
+      # Prefer spreading across AZs when HPA scales to multiple replicas
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: {{ include "support-ticket-system.fullname" . }}-notification-service
+      containers:
+        - name: notification-service
+          image: {{ include "support-ticket-system.ecrImage" (dict "root" . "tag" .Values.image.notificationService.tag) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 5002
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "5002"
+            # Used by notification-service to fetch ticket details from ticket-api
+            - name: TICKET_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "support-ticket-system.fullname" . }}-backend-config
+                  key: TICKET_API_URL
+          # Liveness: restart if /health stops responding
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.notificationService.probes.liveness.initialDelaySeconds }}
+            periodSeconds:       {{ .Values.notificationService.probes.liveness.periodSeconds }}
+            failureThreshold:    {{ .Values.notificationService.probes.liveness.failureThreshold }}
+            timeoutSeconds:      {{ .Values.notificationService.probes.liveness.timeoutSeconds }}
+          # Readiness: hold traffic until Flask is fully up
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.notificationService.probes.readiness.initialDelaySeconds }}
+            periodSeconds:       {{ .Values.notificationService.probes.readiness.periodSeconds }}
+            failureThreshold:    {{ .Values.notificationService.probes.readiness.failureThreshold }}
+            timeoutSeconds:      {{ .Values.notificationService.probes.readiness.timeoutSeconds }}
+          resources:
+            {{- toYaml .Values.notificationService.resources | nindent 12 }}
+      # Allow in-flight /notify requests to complete before container is killed
+      terminationGracePeriodSeconds: 30

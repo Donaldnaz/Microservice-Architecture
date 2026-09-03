@@ -1,0 +1,48 @@
+# =============================================================================
+# notification-service — HorizontalPodAutoscaler
+#
+# minReplicas=2: raised from 1 to provide HA across AZs.
+#                Note: in-memory state means each pod has a partial view of
+#                notifications — resolve with Redis/RDS before relying on this.
+# maxReplicas=4: allows burst capacity under heavy /notify traffic.
+# CPU target=80%: consistent with the rest of the system.
+#
+# Scale-down is conservative (300s) to avoid discarding in-memory notifications
+# written to a pod that is about to be terminated.
+# =============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "support-ticket-system.fullname" . }}-notification-service
+  namespace: {{ .Values.namespaces.backend }}
+  labels:
+    {{- include "support-ticket-system.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "support-ticket-system.fullname" . }}-notification-service
+  minReplicas: {{ .Values.notificationService.hpa.minReplicas }}
+  maxReplicas: {{ .Values.notificationService.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.notificationService.hpa.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleUp:
+      # Add pods quickly to handle notification bursts
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60
+    scaleDown:
+      # Conservative: avoid prematurely terminating pods with in-memory notifications
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60

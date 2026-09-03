@@ -1,0 +1,48 @@
+# =============================================================================
+# frontend — HorizontalPodAutoscaler
+#
+# Nginx is CPU-efficient but can spike under heavy reverse-proxy load.
+# minReplicas=3 keeps one pod per AZ at all times, ensuring the ALB always
+# has healthy targets registered across all zones.
+# maxReplicas=6 allows aggressive scaling; Nginx pods are cheap.
+# CPU target=80%: scale before Nginx connection queues start growing.
+#
+# Scale-down is conservative (300s) to avoid disrupting keep-alive connections
+# pinned to a pod that is about to be removed.
+# =============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "support-ticket-system.fullname" . }}-frontend
+  namespace: {{ .Values.namespaces.frontend }}
+  labels:
+    {{- include "support-ticket-system.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "support-ticket-system.fullname" . }}-frontend
+  minReplicas: {{ .Values.frontend.hpa.minReplicas }}
+  maxReplicas: {{ .Values.frontend.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.frontend.hpa.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleUp:
+      # Add pods immediately when load increases — ALB gets healthy targets fast
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+    scaleDown:
+      # Conservative: avoid disrupting active keep-alive connections
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60

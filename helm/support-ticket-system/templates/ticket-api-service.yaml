@@ -1,0 +1,23 @@
+# =============================================================================
+# ticket-api — Service (ClusterIP)
+# Internal only — reached by frontend Nginx and notification-service via
+# cluster-local DNS: <fullname>-ticket-api.<backend-ns>.svc.cluster.local:5001
+# No external access needed; the ALB Ingress targets the frontend only.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "support-ticket-system.fullname" . }}-ticket-api
+  namespace: {{ .Values.namespaces.backend }}
+  labels:
+    app: {{ include "support-ticket-system.fullname" . }}-ticket-api
+    {{- include "support-ticket-system.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ include "support-ticket-system.fullname" . }}-ticket-api
+  ports:
+    - name: http
+      port: 5001
+      targetPort: http
+      protocol: TCP

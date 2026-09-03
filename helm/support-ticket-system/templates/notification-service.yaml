@@ -1,0 +1,26 @@
+# =============================================================================
+# notification-service — Service (ClusterIP)
+# Internal only — reachable at:
+#   <fullname>-notification-service.<backend-ns>.svc.cluster.local:5002
+#
+# Consumers:
+#   - ticket-api POSTs to /notify when a ticket is created or updated
+#   - Frontend Nginx proxies /api/notifications to this service
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "support-ticket-system.fullname" . }}-notification-service
+  namespace: {{ .Values.namespaces.backend }}
+  labels:
+    app: {{ include "support-ticket-system.fullname" . }}-notification-service
+    {{- include "support-ticket-system.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ include "support-ticket-system.fullname" . }}-notification-service
+  ports:
+    - name: http
+      port: 5002
+      targetPort: http
+      protocol: TCP

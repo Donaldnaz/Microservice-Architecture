@@ -1,0 +1,109 @@
+# =============================================================================
+# ticket-api — Deployment
+# Flask REST API in the backend namespace.
+# - DB credentials from Secret; service URLs from ConfigMap
+# - RollingUpdate with maxUnavailable=0 ensures zero-downtime deploys
+# - topologySpreadConstraints distributes replicas across AZs
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "support-ticket-system.fullname" . }}-ticket-api
+  namespace: {{ .Values.namespaces.backend }}
+  labels:
+    app: {{ include "support-ticket-system.fullname" . }}-ticket-api
+    {{- include "support-ticket-system.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.ticketApi.replicas }}
+  selector:
+    matchLabels:
+      app: {{ include "support-ticket-system.fullname" . }}-ticket-api
+  # Zero-downtime rollout: bring up new pods before removing old ones
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: {{ include "support-ticket-system.fullname" . }}-ticket-api
+        {{- include "support-ticket-system.labels" . | nindent 8 }}
+    spec:
+      # Spread replicas across availability zones for resilience.
+      # ScheduleAnyway means scheduling still proceeds if perfect spread isn't possible.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: {{ include "support-ticket-system.fullname" . }}-ticket-api
+      containers:
+        - name: ticket-api
+          image: {{ include "support-ticket-system.ecrImage" (dict "root" . "tag" .Values.image.ticketApi.tag) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 5001
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "5001"
+            # ---- RDS credentials from Secret ----
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "support-ticket-system.fullname" . }}-rds-credentials
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "support-ticket-system.fullname" . }}-rds-credentials
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "support-ticket-system.fullname" . }}-rds-credentials
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "support-ticket-system.fullname" . }}-rds-credentials
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "support-ticket-system.fullname" . }}-rds-credentials
+                  key: DB_PASSWORD
+            # ---- Notification service URL from ConfigMap ----
+            - name: NOTIFICATION_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "support-ticket-system.fullname" . }}-backend-config
+                  key: NOTIFICATION_SERVICE_URL
+          # Liveness: restart the container if /health stops responding.
+          # initialDelaySeconds accounts for init_db() on first startup.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.ticketApi.probes.liveness.initialDelaySeconds }}
+            periodSeconds:       {{ .Values.ticketApi.probes.liveness.periodSeconds }}
+            failureThreshold:    {{ .Values.ticketApi.probes.liveness.failureThreshold }}
+            timeoutSeconds:      {{ .Values.ticketApi.probes.liveness.timeoutSeconds }}
+          # Readiness: hold ALB traffic until DB init and app startup complete.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: {{ .Values.ticketApi.probes.readiness.initialDelaySeconds }}
+            periodSeconds:       {{ .Values.ticketApi.probes.readiness.periodSeconds }}
+            failureThreshold:    {{ .Values.ticketApi.probes.readiness.failureThreshold }}
+            timeoutSeconds:      {{ .Values.ticketApi.probes.readiness.timeoutSeconds }}
+          # requests: used by scheduler for pod placement and HPA utilisation calc.
+          # limits:   hard cap to prevent a runaway pod starving neighbours.
+          resources:
+            {{- toYaml .Values.ticketApi.resources | nindent 12 }}
+      # Allow Flask to finish in-flight requests before the container is killed
+      terminationGracePeriodSeconds: 30

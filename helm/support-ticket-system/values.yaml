@@ -1,0 +1,162 @@
+# =============================================================================
+# values.yaml — default configuration for the support-ticket-system chart.
+# Override any value at install time:
+#   helm install my-release ./support-ticket-system -f my-overrides.yaml
+#   helm install my-release ./support-ticket-system --set image.ticketApi.tag=v1.2
+#
+# NEVER commit sensitive values (rds.*, clusterAutoscaler.irsaRoleArn) to
+# version control. Use a separate secrets file or a secrets manager.
+# =============================================================================
+
+# AWS account and region — used to construct ECR image URIs and CA config
+aws:
+  region: "us-east-1"
+  accountId: "609898225362"
+  ecrRepoName: "support-ticket-system"
+  clusterName: "support-ticket-dev"        # EKS cluster name — used by Cluster Autoscaler auto-discovery
+
+# Namespace names — change here if you need different namespace conventions
+namespaces:
+  frontend: frontend
+  backend: backend
+
+# -----------------------------------------------------------------------------
+# Image configuration — each service pulls from the same ECR repo with
+# its own image tag. pullPolicy: Always ensures the latest tag is always pulled.
+# -----------------------------------------------------------------------------
+image:
+  ticketApi:
+    tag: "ticket-api-dev-v1.0.0"
+  notificationService:
+    tag: "notification-api-dev-v1.0.0"
+  frontend:
+    tag: "frontend-app-dev-v1.0.0"
+  pullPolicy: Always
+
+# -----------------------------------------------------------------------------
+# RDS credentials — values must be base64-encoded.
+# In production, prefer External Secrets Operator or AWS Secrets Manager
+# over storing these in values files.
+# -----------------------------------------------------------------------------
+rds:
+  host: "c3VwcG9ydC10aWNrZXQtZGF0YWJhc2UuYzZ0NnV1bWkyMm13LnVzLWVhc3QtMS5yZHMuYW1hem9uYXdzLmNvbQ=="          # base64-encoded RDS endpoint
+  port: "NTQzMg=="  # base64 for "5432"
+  name: "c3VwcG9ydHRpY2tldHM="          # base64-encoded DB name
+  user: "c3VwcG9ydHBvc3RncmVz"          # base64-encoded DB user
+  password: "S0tuVFNXckdzNG1UblNIM0JCcHM="  # base64-encoded DB password
+
+# -----------------------------------------------------------------------------
+# ticket-api — Flask REST API, backed by RDS PostgreSQL
+# -----------------------------------------------------------------------------
+ticketApi:
+  # Initial replica count at startup. HPA will override this after first evaluation.
+  replicas: 2
+  resources:
+    requests:
+      cpu: "250m"     # Scheduler uses this to place pods on nodes
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"    # Hard cap — prevents runaway pods starving neighbours
+      memory: "512Mi"
+  hpa:
+    minReplicas: 2    # Keep 2 replicas minimum for HA across AZs
+    maxReplicas: 4    # Cap cost; raise if load tests show it's needed
+    # Scale up when average CPU across all pods exceeds 80%.
+    targetCPUUtilizationPercentage: 80
+  probes:
+    liveness:
+      initialDelaySeconds: 20   # Give init_db() time to complete on first start
+      periodSeconds: 15
+      failureThreshold: 3
+      timeoutSeconds: 5
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      failureThreshold: 3
+      timeoutSeconds: 5
+
+# -----------------------------------------------------------------------------
+# notification-service — Flask service storing notifications in memory.
+# NOTE: Multiple replicas means each pod holds only the notifications it
+# received — frontend may see partial data depending on which pod is hit.
+# Resolve by migrating to Redis/RDS before scaling beyond minReplicas=2.
+# -----------------------------------------------------------------------------
+notificationService:
+  # 2 replicas at startup for baseline HA — see NOTE above re: in-memory state
+  replicas: 2
+  resources:
+    requests:
+      cpu: "150m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  hpa:
+    minReplicas: 2    # Raised from 1 — ensure HA; address in-memory state first
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 80
+  probes:
+    liveness:
+      initialDelaySeconds: 10
+      periodSeconds: 15
+      failureThreshold: 3
+      timeoutSeconds: 5
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      failureThreshold: 3
+      timeoutSeconds: 5
+
+# -----------------------------------------------------------------------------
+# frontend — Nginx serving the SPA and reverse-proxying /api/* to backends
+# -----------------------------------------------------------------------------
+frontend:
+  # 3 replicas at startup — spreads across 3 AZs immediately
+  replicas: 3
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "300m"
+      memory: "256Mi"
+  hpa:
+    minReplicas: 3    # Keeps one pod per AZ at all times at minimum
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 80
+  probes:
+    liveness:
+      initialDelaySeconds: 10
+      periodSeconds: 15
+      failureThreshold: 3
+      timeoutSeconds: 5
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      failureThreshold: 3
+      timeoutSeconds: 5
+
+# -----------------------------------------------------------------------------
+# Cluster Autoscaler — scales EC2 nodes based on pod scheduling pressure
+# -----------------------------------------------------------------------------
+clusterAutoscaler:
+  # IRSA role ARN — grants the CA pod AWS API access without static credentials
+  irsaRoleArn: "arn:aws:iam::609898225362:role/ClusterEKSAutoscaler"   # arn:aws:iam::<account>:role/<role-name>
+  image:
+    # Pin CA version to match your EKS Kubernetes minor version.
+    # EKS 1.29 → v1.29.x  |  Check: https://github.com/kubernetes/autoscaler/releases
+    tag: "v1.34.5"
+  scaleDown:
+    # Remove a node when its requested resources stay below this threshold
+    utilizationThreshold: "0.5"
+    # Wait 2 min after a scale-up before evaluating scale-down (prevents thrashing)
+    delayAfterAdd: "2m"
+    # Node must be underutilised for 10 min before CA drains and terminates it
+    unneededTime: "10m"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "600Mi"
+    limits:
+      cpu: "100m"
+      memory: "600Mi"

@@ -1,0 +1,84 @@
+# =============================================================================
+# frontend — Deployment
+# Nginx in the frontend namespace: serves the SPA and reverse-proxies
+# /api/tickets → ticket-api and /api/notifications → notification-service.
+#
+# TICKET_API_URL and NOTIFICATION_SERVICE_URL are injected via envsubst
+# into nginx.conf at container startup by the official nginx:alpine image
+# (any *.template file in /etc/nginx/templates/ is processed automatically).
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "support-ticket-system.fullname" . }}-frontend
+  namespace: {{ .Values.namespaces.frontend }}
+  labels:
+    app: {{ include "support-ticket-system.fullname" . }}-frontend
+    {{- include "support-ticket-system.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.frontend.replicas }}
+  selector:
+    matchLabels:
+      app: {{ include "support-ticket-system.fullname" . }}-frontend
+  # Zero-downtime rollout: new pods must be ready before old ones are removed
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: {{ include "support-ticket-system.fullname" . }}-frontend
+        {{- include "support-ticket-system.labels" . | nindent 8 }}
+    spec:
+      # With replicas=3, this spreads one pod per AZ by default
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: {{ include "support-ticket-system.fullname" . }}-frontend
+      containers:
+        - name: frontend
+          image: {{ include "support-ticket-system.ecrImage" (dict "root" . "tag" .Values.image.frontend.tag) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          env:
+            # Substituted into nginx.conf via envsubst at container startup
+            - name: TICKET_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "support-ticket-system.fullname" . }}-frontend-config
+                  key: TICKET_API_URL
+            - name: NOTIFICATION_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "support-ticket-system.fullname" . }}-frontend-config
+                  key: NOTIFICATION_SERVICE_URL
+          # Liveness: restart the container if Nginx stops serving
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: {{ .Values.frontend.probes.liveness.initialDelaySeconds }}
+            periodSeconds:       {{ .Values.frontend.probes.liveness.periodSeconds }}
+            failureThreshold:    {{ .Values.frontend.probes.liveness.failureThreshold }}
+            timeoutSeconds:      {{ .Values.frontend.probes.liveness.timeoutSeconds }}
+          # Readiness: hold ALB traffic until Nginx is fully ready
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: {{ .Values.frontend.probes.readiness.initialDelaySeconds }}
+            periodSeconds:       {{ .Values.frontend.probes.readiness.periodSeconds }}
+            failureThreshold:    {{ .Values.frontend.probes.readiness.failureThreshold }}
+            timeoutSeconds:      {{ .Values.frontend.probes.readiness.timeoutSeconds }}
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+      # Allow Nginx to drain keep-alive connections before shutdown
+      terminationGracePeriodSeconds: 30

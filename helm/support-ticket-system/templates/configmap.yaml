@@ -1,0 +1,48 @@
+# =============================================================================
+# ConfigMaps — non-sensitive runtime configuration
+#
+# Inter-service URLs use full cluster-local DNS so they resolve correctly
+# across namespaces: <service>.<namespace>.svc.cluster.local:<port>
+#
+# Service names are derived from the release fullname so they stay consistent
+# with the Service resources created by this chart.
+#
+# Two ConfigMaps:
+#   backend-config  (namespace: backend)  — consumed by ticket-api and
+#                                           notification-service
+#   frontend-config (namespace: frontend) — consumed by Nginx via envsubst
+#                                           at container startup
+# =============================================================================
+
+# ----------------------------------------------------------------------------
+# 1. Backend ConfigMap
+# ----------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "support-ticket-system.fullname" . }}-backend-config
+  namespace: {{ .Values.namespaces.backend }}
+  labels:
+    {{- include "support-ticket-system.labels" . | nindent 4 }}
+data:
+  # ticket-api uses this to POST notification events to the notification-service
+  NOTIFICATION_SERVICE_URL: "http://{{ include "support-ticket-system.fullname" . }}-notification-service.{{ .Values.namespaces.backend }}.svc.cluster.local:5002"
+  # notification-service uses this to fetch ticket details from ticket-api
+  TICKET_API_URL: "http://{{ include "support-ticket-system.fullname" . }}-ticket-api.{{ .Values.namespaces.backend }}.svc.cluster.local:5001"
+
+---
+# ----------------------------------------------------------------------------
+# 2. Frontend ConfigMap
+# Nginx's entrypoint runs envsubst to substitute these into nginx.conf before
+# the server starts, making backend URLs injectable without rebuilding the image.
+# ----------------------------------------------------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "support-ticket-system.fullname" . }}-frontend-config
+  namespace: {{ .Values.namespaces.frontend }}
+  labels:
+    {{- include "support-ticket-system.labels" . | nindent 4 }}
+data:
+  TICKET_API_URL:           "http://{{ include "support-ticket-system.fullname" . }}-ticket-api.{{ .Values.namespaces.backend }}.svc.cluster.local:5001"
+  NOTIFICATION_SERVICE_URL: "http://{{ include "support-ticket-system.fullname" . }}-notification-service.{{ .Values.namespaces.backend }}.svc.cluster.local:5002"

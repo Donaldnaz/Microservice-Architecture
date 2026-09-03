@@ -1,0 +1,50 @@
+# =============================================================================
+# ticket-api — HorizontalPodAutoscaler
+#
+# Scales pods based on average CPU utilisation across all ticket-api pods.
+# HPA works with Cluster Autoscaler:
+#   load ↑ → HPA adds pods → if no node capacity → CA adds a node
+#   load ↓ → HPA removes pods → nodes underutilised → CA removes nodes
+#
+# minReplicas=2 keeps HA across two AZs at baseline.
+# maxReplicas=4 caps cost; adjust after load testing.
+# CPU target=80%: scale before saturation, with 20% headroom for spikes.
+#
+# Prerequisite: Metrics Server must be installed on the cluster.
+# =============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "support-ticket-system.fullname" . }}-ticket-api
+  namespace: {{ .Values.namespaces.backend }}
+  labels:
+    {{- include "support-ticket-system.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "support-ticket-system.fullname" . }}-ticket-api
+  minReplicas: {{ .Values.ticketApi.hpa.minReplicas }}
+  maxReplicas: {{ .Values.ticketApi.hpa.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.ticketApi.hpa.targetCPUUtilizationPercentage }}
+  behavior:
+    scaleUp:
+      # React to load spikes immediately — no stabilization delay
+      stabilizationWindowSeconds: 0
+      policies:
+        - type: Pods
+          value: 2          # Add up to 2 pods per 60s window
+          periodSeconds: 60
+    scaleDown:
+      # Wait 5 min of sustained low load before removing a pod (prevents thrashing)
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1          # Remove at most 1 pod per 60s window
+          periodSeconds: 60

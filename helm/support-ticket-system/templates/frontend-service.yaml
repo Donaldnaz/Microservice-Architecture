@@ -1,0 +1,27 @@
+# =============================================================================
+# frontend — Service (LoadBalancer)
+# AWS automatically provisions a Classic Load Balancer (CLB) when it sees
+# type: LoadBalancer on EKS — no Ingress controller or extra IAM setup needed.
+# The CLB DNS name is the public entry point for the application.
+#
+# After deploying, get the DNS name with:
+#   kubectl get svc -n frontend
+# The EXTERNAL-IP column will show the CLB DNS name (~1-2 min to provision).
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "support-ticket-system.fullname" . }}-frontend
+  namespace: {{ .Values.namespaces.frontend }}
+  labels:
+    app: {{ include "support-ticket-system.fullname" . }}-frontend
+    {{- include "support-ticket-system.labels" . | nindent 4 }}
+spec:
+  type: LoadBalancer
+  selector:
+    app: {{ include "support-ticket-system.fullname" . }}-frontend
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
