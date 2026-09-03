@@ -47,20 +47,21 @@ rds:
 
 # -----------------------------------------------------------------------------
 # ticket-api — Flask REST API, backed by RDS PostgreSQL
+# Sized for t3.small (2 vCPU / 2GB RAM per node).
 # -----------------------------------------------------------------------------
 ticketApi:
-  # Initial replica count at startup. HPA will override this after first evaluation.
+  # 2 replicas spread across 2 nodes — fits within t3.small capacity
   replicas: 2
   resources:
     requests:
-      cpu: "250m"     # Scheduler uses this to place pods on nodes
-      memory: "256Mi"
+      cpu: "100m"     # Scheduler uses this to place pods on nodes
+      memory: "128Mi"
     limits:
-      cpu: "1000m"    # Hard cap — prevents runaway pods starving neighbours
-      memory: "512Mi"
+      cpu: "400m"     # Hard cap — stays within t3.small vCPU headroom
+      memory: "256Mi"
   hpa:
     minReplicas: 2    # Keep 2 replicas minimum for HA across AZs
-    maxReplicas: 4    # Cap cost; raise if load tests show it's needed
+    maxReplicas: 4    # CA will add a node if all 4 are needed
     # Scale up when average CPU across all pods exceeds 80%.
     targetCPUUtilizationPercentage: 80
   probes:
@@ -77,23 +78,23 @@ ticketApi:
 
 # -----------------------------------------------------------------------------
 # notification-service — Flask service storing notifications in memory.
-# NOTE: Multiple replicas means each pod holds only the notifications it
-# received — frontend may see partial data depending on which pod is hit.
-# Resolve by migrating to Redis/RDS before scaling beyond minReplicas=2.
+# NOTE: Single replica avoids the in-memory state split problem where each
+# pod holds only its own notifications. Upgrade to Redis/RDS before scaling.
+# Sized for t3.small.
 # -----------------------------------------------------------------------------
 notificationService:
-  # 2 replicas at startup for baseline HA — see NOTE above re: in-memory state
-  replicas: 2
+  # 1 replica — avoids in-memory state inconsistency across pods
+  replicas: 1
   resources:
     requests:
-      cpu: "150m"
-      memory: "256Mi"
+      cpu: "75m"
+      memory: "96Mi"
     limits:
-      cpu: "500m"
-      memory: "512Mi"
+      cpu: "200m"
+      memory: "192Mi"
   hpa:
-    minReplicas: 2    # Raised from 1 — ensure HA; address in-memory state first
-    maxReplicas: 4
+    minReplicas: 1    # Keep at 1 until in-memory state issue is resolved
+    maxReplicas: 3
     targetCPUUtilizationPercentage: 80
   probes:
     liveness:
@@ -109,20 +110,21 @@ notificationService:
 
 # -----------------------------------------------------------------------------
 # frontend — Nginx serving the SPA and reverse-proxying /api/* to backends
+# Sized for t3.small. 2 replicas gives HA without over-provisioning.
 # -----------------------------------------------------------------------------
 frontend:
-  # 3 replicas at startup — spreads across 3 AZs immediately
-  replicas: 3
+  # 2 replicas — enough for HA across 2 AZs on t3.small nodes
+  replicas: 2
   resources:
     requests:
-      cpu: "100m"
-      memory: "128Mi"
+      cpu: "50m"
+      memory: "64Mi"
     limits:
-      cpu: "300m"
-      memory: "256Mi"
+      cpu: "150m"
+      memory: "128Mi"
   hpa:
-    minReplicas: 3    # Keeps one pod per AZ at all times at minimum
-    maxReplicas: 6
+    minReplicas: 2    # Minimum HA baseline
+    maxReplicas: 4
     targetCPUUtilizationPercentage: 80
   probes:
     liveness:
@@ -138,10 +140,12 @@ frontend:
 
 # -----------------------------------------------------------------------------
 # Cluster Autoscaler — scales EC2 nodes based on pod scheduling pressure
+# Sized for t3.small: memory reduced to 300Mi which is sufficient for a
+# small cluster (< 100 nodes). The default 600Mi is for large clusters.
 # -----------------------------------------------------------------------------
 clusterAutoscaler:
   # IRSA role ARN — grants the CA pod AWS API access without static credentials
-  irsaRoleArn: "arn:aws:iam::609898225362:role/ClusterEKSAutoscaler"   # arn:aws:iam::<account>:role/<role-name>
+  irsaRoleArn: "arn:aws:iam::609898225362:role/ClusterEKSAutoscaler"
   image:
     # Pin CA version to match your EKS Kubernetes minor version.
     # EKS 1.29 → v1.29.x  |  Check: https://github.com/kubernetes/autoscaler/releases
@@ -156,7 +160,7 @@ clusterAutoscaler:
   resources:
     requests:
       cpu: "100m"
-      memory: "600Mi"
+      memory: "300Mi"   # 300Mi is sufficient for clusters < 100 nodes
     limits:
-      cpu: "100m"
-      memory: "600Mi"
+      cpu: "200m"
+      memory: "300Mi"
